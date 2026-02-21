@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>...</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Alumni+Sans:ital,wght@0,100..900;1,100..900&family=Bebas+Neue&family=Lobster&family=Tiny5&family=Waterfall&display=swap');
+        * { 
+            font-family: "Alumni Sans", sans-serif;
+            font-optical-sizing: auto;
+            font-weight: normal;
+            font-style: normal;
+            box-sizing: border-box;
+        }
+        body {
+            margin: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #render3d { z-index: 50; }
+        #ui { z-index: 100; }
+        #backgroundui { z-index: 0; }
+        .layer {
+            display: block;
+            position: fixed;
+            width: 100%;
+            height: 100%;
+        }
+        .shake-light {
+            animation: shakeLight 0.4s ease-in-out infinite;
+        }
+
+        @keyframes shakeLight {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            20%      { transform: translate(-1px, 1px) rotate(-0.5deg); }
+            40%      { transform: translate(1px, -1px) rotate(0.5deg); }
+            60%      { transform: translate(-1px, -1px) rotate(0deg); }
+            80%      { transform: translate(1px, 1px) rotate(-0.5deg); }
+        }
+        .shake-medium {
+            animation: shakeMedium 0.3s ease-in-out infinite;
+        }
+
+        @keyframes shakeMedium {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            10%      { transform: translate(-2px, -1px) rotate(-1deg); }
+            30%      { transform: translate(2px, 2px) rotate(1deg); }
+            50%      { transform: translate(-1px, 2px) rotate(-1.5deg); }
+            70%      { transform: translate(2px, -2px) rotate(1deg); }
+            90%      { transform: translate(-2px, 1px) rotate(-0.5deg); }
+        }
+        .shake-strong {
+            animation: shakeStrong 0.2s linear infinite;
+        }
+
+        @keyframes shakeStrong {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            10%      { transform: translate(-4px, -3px) rotate(-3deg); }
+            20%      { transform: translate(3px, 4px) rotate(2deg); }
+            30%      { transform: translate(-4px, 2px) rotate(-2.5deg); }
+            40%      { transform: translate(3px, -4px) rotate(3deg); }
+            50%      { transform: translate(-2px, -3px) rotate(-1deg); }
+            60%      { transform: translate(4px, 3px) rotate(2.5deg); }
+            70%      { transform: translate(-3px, 4px) rotate(-3deg); }
+            80%      { transform: translate(4px, -3px) rotate(1.5deg); }
+            90%      { transform: translate(-4px, -2px) rotate(-2deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="ui" class="layer"></div>
+    <canvas id="render3d" class="layer"></canvas>
+    <div id="backgroundui" class="layer"></div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.182.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.182.0/examples/jsm/",
+            "@tweenjs/tween.js": "https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.esm.js",
+            "rapier": "https://cdn.skypack.dev/@dimforge/rapier3d-compat"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+        import * as TWEEN from '@tweenjs/tween.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
+        import RAPIER from 'rapier';
+
+        const TEXTDATAURL = ""
+
+        class DobrodzeyEngine {
+            constructor(ui, canvas, backgroundui) {
+                /** @type {HTMLElement} */
+                this.ui = ui;
+                this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+                this.backgroundui = backgroundui;
+
+                this.clock = new THREE.Clock();
+
+                this.currentScene = undefined;
+                this.currentPhysicsWorld = undefined;
+                this.currentCamera = undefined;
+                this.currentComposer = undefined;
+
+                this.currentUpdate = undefined;
+                this.currentPhysicsUpdate = undefined;
+                this.currentKeyup = undefined;
+                this.currentKeydown = undefined;
+
+                this.sceneGenerators = {};
+                this.storage = {};
+
+                this.linkedObjectsAndRigidBodies = [];
+
+                this.debugCollidersEnabled = false;
+                this.debugCollidersMeshes = new Map();
+
+                this.debugMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x00ff00,
+                    wireframe: true,
+                    transparent: true,
+                    opacity: 0.5
+                });
+            }
+
+            async init() {
+                // Инициализация Rapier
+                await RAPIER.init();
+                this.renderer.setAnimationLoop(this.loop.bind(this));
+            }
+
+            addLinkedObject(object, rigidBody) {
+                // Добавление связанного объекта и физического тела
+                this.linkedObjectsAndRigidBodies.push({ object, rigidBody });
+            }
+
+            addSceneGenerator(name, generator) {
+                // Добавление генератора сцены
+                this.sceneGenerators[name] = generator;
+            }
+
+            createComposer(scene, camera) {
+                // Дефолт создавалка композера
+                const composer = new EffectComposer(this.renderer);
+                composer.addPass(new RenderPass(scene, camera));
+                return composer;
+            }
+
+            syncLinkedObjects() {
+                // Синхронизация связанных объектов с физикой
+                for (const { object, rigidBody, resolve } of this.linkedObjectsAndRigidBodies) {
+                    if (resolve) {
+                        resolve(object, rigidBody);
+                    } else {
+                        const position = rigidBody.translation();
+                        const rotation = rigidBody.rotation();
+
+                        object.position.set(position.x, position.y, position.z);
+                        object.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+                    }
+                }
+            }
+
+            generateScene(name) {
+                // Генерация сцены (почти как смена сцены из юнити)
+                const generator = this.sceneGenerators[name];
+                if (generator) {
+                    this.clearDebugColliders();
+
+                    this.renderer.toneMapping = THREE.NoToneMapping;
+                    this.linkedObjectsAndRigidBodies = [];
+
+                    if (this.currentKeyup) {
+                        document.removeEventListener("keyup", this.currentKeyup);
+                        this.currentKeyup = undefined;
+                    }
+                    if (this.currentKeydown) {
+                        document.removeEventListener("keydown", this.currentKeydown);
+                        this.currentKeydown = undefined;
+                    }
+                    if (this.currentResize) {
+                        window.removeEventListener("resize", this.currentResize);
+                        this.currentResize = undefined;
+                    }
+
+                    const sceneData = generator(this);
+
+                    this.currentScene = sceneData.scene;
+                    this.currentPhysicsWorld = sceneData.physicsWorld;
+                    this.currentCamera = sceneData.camera;
+                    this.currentComposer = sceneData.composer;
+
+                    this.currentUpdate = sceneData.update;
+                    this.currentPhysicsUpdate = sceneData.physicsUpdate;
+
+                    this.currentKeyup = this.wrapFunctionWithGameIfItIsNotNull(sceneData.keyup);
+                    this.currentKeydown = this.wrapFunctionWithGameIfItIsNotNull(sceneData.keydown);
+                    this.currentResize = this.wrapFunctionWithGameIfItIsNotNull(sceneData.resize);
+
+                    if (this.currentKeyup) document.addEventListener("keyup", this.currentKeyup);
+                    if (this.currentKeydown) document.addEventListener("keydown", this.currentKeydown);
+                    if (this.currentResize) window.addEventListener("resize", this.currentResize);
+
+                    this.currentResize?.();
+                    sceneData.ready?.(this);
+                }
+            }
+
+            clearUI() {
+                // Зачищаем передний ui
+                this.ui.replaceChildren();
+            }
+
+            clearBackgroundUI() {
+                // Зачищаем фоновый ui
+                this.backgroundui.replaceChildren();
+            }
+
+            wrapFunctionWithGameIfItIsNotNull(func) {
+                // Если функция не null, возвращаем её с добавлением игрового контекста
+                return func ? (...args) => func(this, ...args) : undefined;
+            }
+
+            cameraResize() {
+                // Обновление проекции камеры
+                if (this.currentCamera) {
+                    this.currentCamera.aspect = this.renderer.domElement.clientWidth / this.renderer.domElement.clientHeight;
+                    this.currentCamera.updateProjectionMatrix();
+                }
+            }
+
+            renderResize() {
+                // Обновление размера рендера
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                this.currentComposer?.setSize(this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight);
+                this.renderer.setSize(this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight, false);
+            }
+
+            getBestLocale(supportedLocales = ['base']) {
+                // Найти подходящую локализацию из всех
+                const browserLangs = navigator.languages?.length > 0
+                    ? navigator.languages
+                    : [navigator.language || navigator.userLanguage || 'en'];
+
+                const normalizedBrowserLangs = browserLangs.map(lang => lang.replace(/_/g, '-').toLowerCase());
+
+                const supportedMap = supportedLocales.map(locale => ({
+                    original: locale,
+                    normalized: locale.toLowerCase()
+                }));
+
+                for (const browserLang of normalizedBrowserLangs) {
+                    for (const supported of supportedMap) {
+                        if (supported.normalized === browserLang)
+                            return supported.original;
+                    }
+                }
+
+                for (const browserLang of normalizedBrowserLangs) {
+                    const langCode = browserLang.split('-')[0];
+                    for (const supported of supportedMap) {
+                        if (supported.normalized === langCode || supported.normalized.startsWith(langCode + '-'))
+                            return supported.original;
+                    }
+                }
+
+                const baseLocale = supportedLocales.find(l => l === 'base');
+                return baseLocale || supportedLocales[0] || 'base';
+            }
+
+            loop() {
+                // Игровой цикл
+                if (this.currentPhysicsWorld) {
+                    this.currentPhysicsWorld.step();
+                    this.currentPhysicsUpdate?.(this);
+                }
+                this.currentUpdate?.(this);
+                this.updateDebugColliders();
+
+                if (this.currentComposer) {
+                    this.currentComposer.render();
+                } else if (this.currentScene && this.currentCamera) {
+                    this.renderer.render(this.currentScene, this.currentCamera);
+                }
+            }
+
+            clearDebugColliders() {
+                // Очищаем ВСЕ debug-меши
+                if (this.currentScene) {
+                    for (let mesh of this.debugCollidersMeshes.values()) {
+                        this.currentScene.remove(mesh);
+                        this.disposeMesh(mesh);
+                    }
+                }
+                this.debugCollidersMeshes.clear();
+            }
+
+            disposeMesh(obj) {
+                // Освобождаем ресурсы (геометрию, материал)
+                if (obj instanceof THREE.Mesh) {
+                    if (obj.geometry) obj.geometry.dispose();
+                    if (obj.material) {
+                        if (Array.isArray(obj.material))
+                            obj.material.forEach(m => m.dispose());
+                        else
+                            obj.material.dispose();
+                    }
+                } else if (obj instanceof THREE.Group) {
+                    obj.children.forEach(child => this.disposeMesh(child));
+                }
+            }
+
+            createDebugMeshForCollider(collider) {
+                // Генерация debug-меши
+                const type = collider.shapeType();
+                let mesh = null;
+
+                if (type === RAPIER.ShapeType.Cuboid) {
+                    const he = collider.halfExtents();
+                    const geometry = new THREE.BoxGeometry(he.x * 2, he.y * 2, he.z * 2);
+                    mesh = new THREE.Mesh(geometry, this.debugMaterial.clone());
+                }
+                else if (type === RAPIER.ShapeType.Ball) {
+                    const r = collider.radius();
+                    const geometry = new THREE.SphereGeometry(r, 16, 16);
+                    mesh = new THREE.Mesh(geometry, this.debugMaterial.clone());
+                }
+                else if (type === RAPIER.ShapeType.Capsule) {
+                    const r = collider.radius();
+                    const halfHeight = collider.halfHeight();
+                    const group = new THREE.Group();
+                    
+                    const cylGeo = new THREE.CylinderGeometry(r, r, halfHeight * 2, 16);
+                    const cylMat = this.debugMaterial.clone();
+                    const cylinder = new THREE.Mesh(cylGeo, cylMat);
+                    cylinder.position.y = 0;
+                    group.add(cylinder);
+
+                    const sphereGeo = new THREE.SphereGeometry(r, 16, 16);
+                    const sphereMat = this.debugMaterial.clone();
+                    const topSphere = new THREE.Mesh(sphereGeo, sphereMat);
+                    topSphere.position.y = halfHeight;
+                    group.add(topSphere);
+
+                    const bottomSphere = new THREE.Mesh(sphereGeo, sphereMat.clone());
+                    bottomSphere.position.y = -halfHeight;
+                    group.add(bottomSphere);
+
+                    mesh = group;
+                }
+                else if (type === RAPIER.ShapeType.Cylinder) {
+                    const r = collider.radius();
+                    const halfHeight = collider.halfHeight();
+                    const geometry = new THREE.CylinderGeometry(r, r, halfHeight * 2, 16);
+                    mesh = new THREE.Mesh(geometry, this.debugMaterial.clone());
+                }
+                else if (type === RAPIER.ShapeType.Cone) {
+                    const r = collider.radius();
+                    const halfHeight = collider.halfHeight();
+                    const geometry = new THREE.ConeGeometry(r, halfHeight * 2, 16);
+                    mesh = new THREE.Mesh(geometry, this.debugMaterial.clone());
+                }
+                else {
+                    return null;
+                }
+
+                return mesh;
+            }
+
+            updateDebugColliders() {
+                // Отладка коллайдеров
+                if (!this.debugCollidersEnabled || !this.currentPhysicsWorld || !this.currentScene) return;
+
+                const world = this.currentPhysicsWorld;
+                const currentColliders = new Set();
+
+                // Перебираем все коллайдеры в мире
+                world.forEachCollider((collider) => {
+                    currentColliders.add(collider);
+
+                    let mesh = this.debugCollidersMeshes.get(collider);
+                    if (!mesh) {
+                        mesh = this.createDebugMeshForCollider(collider);
+                        if (mesh) {
+                            this.currentScene.add(mesh);
+                            this.debugCollidersMeshes.set(collider, mesh);
+                        }
+                    }
+
+                    if (mesh) {
+                        // Обновляем позицию и поворот коллайдера (в мировых координатах)
+                        const pos = collider.translation();
+                        const rot = collider.rotation();
+                        mesh.position.set(pos.x, pos.y, pos.z);
+                        mesh.quaternion.set(rot.x, rot.y, rot.z, rot.w);
+                    }
+                });
+
+                // Удаляем меши для коллайдеров, которые больше не существуют
+                // Это необходимо, чтобы debug-меши не оставались в сцене после уничтожения объектов
+                for (let [collider, mesh] of this.debugCollidersMeshes.entries()) {
+                    if (!currentColliders.has(collider)) {
+                        this.currentScene.remove(mesh);
+                        this.disposeMesh(mesh);
+                        this.debugCollidersMeshes.delete(collider);
+                    }
+                }
+            }
+        }
+
+        // ========== СОЗДАНИЕ ИГРЫ И СЦЕН ==========
+
+        const game = new DobrodzeyEngine (
+            document.querySelector("#ui"),
+            document.querySelector("#render3d"),
+            document.querySelector("#backgroundui")
+        );
+
+        (async () => {
+            await game.init();
+
+            // тестовая сцена со всеми типами коллайдеров
+            game.addSceneGenerator("test", (game) => {
+                game.clearUI();
+                game.clearBackgroundUI();
+
+                const scene = new THREE.Scene();
+                scene.background = new THREE.Color(0x111122);
+
+                const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
+                camera.position.set(8, 6, 12);
+                camera.lookAt(0, 3, 0);
+
+                const ambientLight = new THREE.AmbientLight(0x404060);
+                scene.add(ambientLight);
+                const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+                dirLight.position.set(2, 8, 4);
+                scene.add(dirLight);
+                const fillLight = new THREE.PointLight(0x446688, 0.5);
+                fillLight.position.set(-3, 5, 5);
+                scene.add(fillLight);
+
+                const gridHelper = new THREE.GridHelper(20, 20, 0x888888, 0x444444);
+                scene.add(gridHelper);
+
+                const gravity = { x: 0.0, y: -9.81, z: 0.0 };
+                const physicsWorld = new RAPIER.World(gravity);
+
+                const groundSize = 20.0;
+                const groundHeight = 0.5;
+                const groundBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0.0, -groundHeight/2, 0.0);
+                const groundBody = physicsWorld.createRigidBody(groundBodyDesc);
+                const groundColliderDesc = RAPIER.ColliderDesc.cuboid(groundSize/2, groundHeight/2, groundSize/2);
+                physicsWorld.createCollider(groundColliderDesc, groundBody);
+
+                const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x336633 });
+                const groundMesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(groundSize, groundHeight, groundSize),
+                    groundMaterial
+                );
+                groundMesh.position.set(0, -groundHeight/2, 0);
+                scene.add(groundMesh);
+
+                function createPhysicalObject(type, pos, color, sizeParams) {
+                    let bodyDesc, colliderDesc, mesh;
+                    
+                    switch (type) {
+                        case 'cuboid':
+                            bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(pos.x, pos.y, pos.z);
+                            colliderDesc = RAPIER.ColliderDesc.cuboid(sizeParams.w/2, sizeParams.h/2, sizeParams.d/2).setDensity(1.0);
+                            mesh = new THREE.Mesh(new THREE.BoxGeometry(sizeParams.w, sizeParams.h, sizeParams.d), new THREE.MeshStandardMaterial({ color }));
+                            break;
+                        case 'ball':
+                            bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(pos.x, pos.y, pos.z);
+                            colliderDesc = RAPIER.ColliderDesc.ball(sizeParams.r).setDensity(1.0);
+                            mesh = new THREE.Mesh(new THREE.SphereGeometry(sizeParams.r, 32, 16), new THREE.MeshStandardMaterial({ color }));
+                            break;
+                        case 'capsule':
+                            bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(pos.x, pos.y, pos.z);
+                            colliderDesc = RAPIER.ColliderDesc.capsule(sizeParams.halfHeight, sizeParams.r).setDensity(1.0);
+                            const group = new THREE.Group();
+                            const cylGeo = new THREE.CylinderGeometry(sizeParams.r, sizeParams.r, sizeParams.halfHeight*2, 16);
+                            const cylMat = new THREE.MeshStandardMaterial({ color });
+                            const cylinder = new THREE.Mesh(cylGeo, cylMat);
+                            cylinder.position.y = 0;
+                            group.add(cylinder);
+                            const sphereGeo = new THREE.SphereGeometry(sizeParams.r, 16, 16);
+                            const sphereMat = new THREE.MeshStandardMaterial({ color });
+                            const topSphere = new THREE.Mesh(sphereGeo, sphereMat);
+                            topSphere.position.y = sizeParams.halfHeight;
+                            group.add(topSphere);
+                            const bottomSphere = new THREE.Mesh(sphereGeo, sphereMat.clone());
+                            bottomSphere.position.y = -sizeParams.halfHeight;
+                            group.add(bottomSphere);
+                            mesh = group;
+                            break;
+                        case 'cylinder':
+                            bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(pos.x, pos.y, pos.z);
+                            colliderDesc = RAPIER.ColliderDesc.cylinder(sizeParams.halfHeight, sizeParams.r).setDensity(1.0);
+                            mesh = new THREE.Mesh(new THREE.CylinderGeometry(sizeParams.r, sizeParams.r, sizeParams.halfHeight*2, 16), new THREE.MeshStandardMaterial({ color }));
+                            break;
+                        case 'cone':
+                            bodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(pos.x, pos.y, pos.z);
+                            colliderDesc = RAPIER.ColliderDesc.cone(sizeParams.halfHeight, sizeParams.r).setDensity(1.0);
+                            mesh = new THREE.Mesh(new THREE.ConeGeometry(sizeParams.r, sizeParams.halfHeight*2, 16), new THREE.MeshStandardMaterial({ color }));
+                            break;
+                        default:
+                            return null;
+                    }
+
+                    const body = physicsWorld.createRigidBody(bodyDesc);
+                    physicsWorld.createCollider(colliderDesc, body);
+                    
+                    mesh.position.copy(pos);
+                    scene.add(mesh);
+                    game.addLinkedObject(mesh, body);
+                }
+
+                createPhysicalObject('cuboid', new THREE.Vector3(-6, 4, 0), 0xff5555, { w: 1.2, h: 1.2, d: 1.2 });
+                createPhysicalObject('ball', new THREE.Vector3(-3, 5, 1), 0x55ff55, { r: 0.8 });
+                createPhysicalObject('capsule', new THREE.Vector3(0, 6, -1), 0x5555ff, { halfHeight: 0.8, r: 0.5 });
+                createPhysicalObject('cylinder', new THREE.Vector3(3, 4, 1), 0xffaa00, { halfHeight: 0.8, r: 0.6 });
+                createPhysicalObject('cone', new THREE.Vector3(6, 5, -1), 0xaa44ff, { halfHeight: 1.0, r: 0.7 });
+
+                createPhysicalObject('cuboid', new THREE.Vector3(-5, 2, 3), 0xff8888, { w: 0.8, h: 0.8, d: 0.8 });
+                createPhysicalObject('ball', new THREE.Vector3(-2, 3, 4), 0x88ff88, { r: 0.6 });
+                createPhysicalObject('capsule', new THREE.Vector3(2, 4, 3), 0x8888ff, { halfHeight: 0.6, r: 0.4 });
+                createPhysicalObject('cylinder', new THREE.Vector3(5, 3, 4), 0xffcc88, { halfHeight: 0.6, r: 0.5 });
+                createPhysicalObject('cone', new THREE.Vector3(7, 4, 2), 0xcc88ff, { halfHeight: 0.8, r: 0.5 });
+
+                const physicsUpdate = (game) => {
+                    game.syncLinkedObjects();
+                };
+
+                const resize = (game) => {
+                    game.cameraResize();
+                    game.renderResize();
+                };
+
+                return {
+                    scene,
+                    camera,
+                    physicsWorld,
+                    physicsUpdate,
+                    resize
+                };
+            });
+
+            game.addSceneGenerator("loadingscreen", /** @param {DobrodzeyEngine} game */ (game) => {
+                game.clearUI();
+                game.clearBackgroundUI();
+
+                game.ui.innerHTML = `
+                    <div class="layer" style="background-color: #385aac; pointer-events: none;">
+                        <div style="position: fixed; transform: translate(0%, -100%); top: 100%; left: 20px;">
+                            <div class="shake-light" style="color: white; font-size: min(10vw, 10vh);">...</div>
+                        </div>
+                    </div>
+                `
+
+                const fileLoader = new THREE.FileLoader(manager);
+                fileLoader.setResponseType('json');
+                fileLoader.load(TEXTDATAURL, (text) => {
+                    game.storage.textdata = text;
+                });
+
+                return {}
+            });
+
+            game.addSceneGenerator("maingame", (game) => {
+                game.clearUI();
+                game.clearBackgroundUI();
+
+                game.renderer.toneMapping = THREE.ReinhardToneMapping;
+
+                game.storage.maingame ??= {};
+                game.storage.maingame.input ??= {};
+                
+                const scene = new THREE.Scene();
+                const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
+                const composer = game.createComposer(scene, camera);
+                composer.addPass(new UnrealBloomPass( 
+					new THREE.Vector2( game.renderer.domElement.clientWidth, game.renderer.domElement.clientHeight ),
+					1.5, // strength - сила свечения
+					0.4, // radius - радиус свечения
+					0.85 // threshold - порог. Пиксели ярче этого значения будут светиться. 1.0 = только самые яркие
+				))
+                const ssaoPass = new SSAOPass( scene, camera, game.renderer.domElement.clientWidth, game.renderer.domElement.clientHeight );
+                ssaoPass.kernelRadius = 0.5;
+                ssaoPass.minDistance = 0.001;
+                ssaoPass.maxDistance = 0.1;
+                composer.addPass( ssaoPass );
+                
+                const keydown = (game, event) => {
+                    //if (!controls.isLocked) return;
+                    
+                    switch (event.code) {
+                        case 'KeyW': game.storage.maingame.input.forward = true; event.preventDefault(); break;
+                        case 'KeyS': game.storage.maingame.input.backward = true; event.preventDefault(); break;
+                        case 'KeyA': game.storage.maingame.input.left = true; event.preventDefault(); break;
+                        case 'KeyD': game.storage.maingame.input.right = true; event.preventDefault(); break;
+                        case 'Escape': game.storage.maingame.input.esc = true; event.preventDefault(); break;
+                        default: break;
+                    }
+                };
+
+                const keyup = (game, event) => {
+                    //if (!controls.isLocked) return;
+
+                    switch (event.code) {
+                        case 'KeyW': game.storage.maingame.input.forward = false; event.preventDefault(); break;
+                        case 'KeyS': game.storage.maingame.input.backward = false; event.preventDefault(); break;
+                        case 'KeyA': game.storage.maingame.input.left = false; event.preventDefault(); break;
+                        case 'KeyD': game.storage.maingame.input.right = false; event.preventDefault(); break;
+                        case 'Escape': game.storage.maingame.input.esc = false; event.preventDefault(); break;
+                        default: break;
+                    }
+                };
+
+                const update = (game) => {
+                    
+                };
+
+                const physicsUpdate = (game) => {
+                    const forward = new THREE.Vector3();
+                    game.currentCamera.getWorldDirection(forward);
+                    forward.y = 0;
+                    forward.normalize();
+                    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+                    
+                    game.syncLinkedObjects();
+                };
+
+                const resize = (game) => {
+                    game.cameraResize();
+                    game.renderResize();
+                };
+
+                return {
+                    scene,
+                    camera,
+                    composer,
+                    keyup,
+                    keydown,
+                    resize
+                };
+
+            });
+            
+            game.generateScene("loadingscreen");
+        })();
+    </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+	"strings": {
+		"title": {
+			"base": "No I Won't Work",
+			"ru": "Когда Работать?"
+		}
+	},
+	"gameassets": {
+		"3dlocation": {"type": 0, "url":""}
+	}
+}
