@@ -566,16 +566,16 @@
                             <div class="shake-light" style="color: white; font-size: min(10vw, 10vh);">...</div>
                         </div>
                     </div>
-                `
+                `;
 
                 const fileLoader = new THREE.FileLoader(manager);
                 fileLoader.setResponseType("json");
                 
-                fileLoader.load(BASEURL + "textdata.json", (text) => {
-                    game.storage.textdata = text;
+                fileLoader.load(BASEURL + "textdata.json", data => {
+                    game.storage.strings = {};
                 });
 
-                return {}
+                return {};
             });
 
             game.addSceneGenerator("maingame", (game) => {

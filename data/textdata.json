@@ -6,6 +6,6 @@
 		}
 	},
 	"gameassets": {
-		"3dlocation": {"type": 0, "path":"models/3dlocation.glb"}
+		"location": {"type": 0, "path":"models/location.glb"}
 	}
 }
