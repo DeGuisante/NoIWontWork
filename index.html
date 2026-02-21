@@ -561,23 +561,57 @@
                 game.clearBackgroundUI();
 
                 game.ui.innerHTML = `
-                    <div class="layer" style="background-color: #385aac; pointer-events: none;">
+                    <div class="layer" style="background-color: black; pointer-events: none;"></div>
+                    <div class="layer" id="loadingscreen-background" style="background-color: #385aac; pointer-events: none;">
                         <div style="position: fixed; transform: translate(0%, -100%); top: 100%; left: 20px;">
-                            <div class="shake-light" style="color: white; font-size: min(10vw, 10vh);">...</div>
+                            <div class="shake-light" id="loadingscreen-text" style="color: white; font-size: min(10vw, 10vh);">...</div>
                         </div>
                     </div>
                 `;
+
+                const loadingscreenBackground = document.querySelector("#loadingscreen-background");
+                const loadingscreenText = document.querySelector("#loadingscreen-text");
 
                 const fileLoader = new THREE.FileLoader();
                 fileLoader.setResponseType("json");
                 
                 fileLoader.load(BASEURL + "textdata.json", data => {
+                    game.storage.assets = {};
                     game.storage.strings = {};
                     
                     for (const key in data.strings)
                         game.storage.strings[key] = data.strings[key][game.getBestLocale(Object.keys(data.strings[key]))];
 
                     document.title = game.storage.strings.title;
+                    const loadingString = game.storage.strings.loading;
+                    loadingscreenText.textContent = loadingString;
+
+                    const manager = new THREE.LoadingManager();
+
+                    manager.onProgress = (item, loaded, total) => {
+                        loadingscreenText.textContent = `${loadingString} ${Math.floor(loaded / total * 100)}%`;
+                    }
+
+                    for (const key in data.gameassets) {
+                        const assetdata = data.gameassets[key]
+                        switch (assetdata.type) {
+                            case 0: // TextureLoader
+                                new THREE.TextureLoader(manager).load(BASEURL + assetdata.path, data => { game.storage.assets[key] = data; });
+                                break;
+                            case 1: // GLTFLoader
+                                new GLTFLoader(manager).load(BASEURL + assetdata.path, data => { game.storage.assets[key] = data; });
+                                break;
+                            case 2: // ImageLoader
+                                new THREE.ImageLoader(manager).load(BASEURL + assetdata.path, data => { game.storage.assets[key] = data; });
+                                break;
+                        }
+                    }
+
+                    manager.onLoad = () => {
+                        loadingscreenBackground.animate([{ clipPath: 'circle(200% at 10% 95%)'}, {clipPath: 'circle(0% at 10% 95%)' }], { duration: 1000, easing: 'ease-in-out', fill: 'forwards' }).onfinish = () => {
+                            game.generateScene("maingame");
+                        };
+                    };
                 });
 
                 return {};

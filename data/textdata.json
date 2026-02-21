@@ -1,11 +1,15 @@
 {
 	"strings": {
+		"loading": {
+			"base": "Loading...",
+			"ru": "Загрызка..."
+		},
 		"title": {
 			"base": "No I Won't Work",
 			"ru": "Когда Работать?"
 		}
 	},
 	"gameassets": {
-		"location": {"type": 0, "path":"models/location.glb"}
+		"location": {"type": 1, "path":"models/location.glb"}
 	}
 }
