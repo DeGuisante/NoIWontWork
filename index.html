@@ -96,7 +96,7 @@
         import { SSAOPass } from 'three/addons/postprocessing/SSAOPass.js';
         import RAPIER from 'rapier';
 
-        const TEXTDATAURL = ""
+        const BASEURL = "https://raw.githubusercontent.com/DeGuisante/noiwontwork.github.io/refs/heads/master/data/"
 
         class DobrodzeyEngine {
             constructor(ui, canvas, backgroundui) {
@@ -569,8 +569,9 @@
                 `
 
                 const fileLoader = new THREE.FileLoader(manager);
-                fileLoader.setResponseType('json');
-                fileLoader.load(TEXTDATAURL, (text) => {
+                fileLoader.setResponseType("json");
+                
+                fileLoader.load(BASEURL + "textdata.json", (text) => {
                     game.storage.textdata = text;
                 });
 
