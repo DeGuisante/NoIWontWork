@@ -325,6 +325,19 @@
                 }
             }
 
+            applyDefaultLightShadowSettings(light) {
+                light.castShadow = true;
+                light.shadow.mapSize.width = 1024;
+                light.shadow.mapSize.height = 1024;
+                light.shadow.camera.near = 1;
+                light.shadow.camera.far = 1000
+            }
+
+            applyDefaultObjectShadowSettings(object) {
+                object.castShadow = true;
+                object.receiveShadow = true;
+            }
+
             createDebugMeshForCollider(collider) {
                 // Генерация debug-меши
                 const type = collider.shapeType();
@@ -607,10 +620,8 @@
                             case 1: // GLTFLoader
                                 new GLTFLoader(manager).load(BASEURL + assetdata.path, data => {
                                     data.scene.traverse((node) => {
-                                        if (node.isMesh) {
-                                            node.castShadow = true;
-                                            node.receiveShadow = true;
-                                        }
+                                        if (node.isMesh)
+                                            game.applyDefaultObjectShadowSettings(node);
                                     });
                                     game.storage.assets[key] = data;
                                 });
@@ -665,13 +676,12 @@
                 composer.addPass( new OutputPass() );
 
                 const light = new THREE.PointLight( 0xffffff, 5, 100 );
-                light.position.set( 0, 2, -4.5 );
+                light.position.set( 0, 1, 0 );
                 light.castShadow = true;
-                light.shadow.mapSize.width = 1024; // default
-                light.shadow.mapSize.height = 1024; // default
-                light.shadow.camera.near = 1; // default
-                light.shadow.camera.far = 1000 // default
-                scene.add( light );
+                game.applyDefaultLightShadowSettings(light);
+                
+                camera.add(light);
+                scene.add(camera);
                 
                 const keydown = (game, event) => {
                     switch (event.code) {
@@ -704,6 +714,7 @@
                     forward.y = 0;
                     forward.normalize().multiplyScalar(0.1);
                     const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize().multiplyScalar(0.1);
+                    const upVector = new THREE.Vector3(0, 1, 0)
                     if (game.storage.maingame.input.forward) {
                         game.currentCamera.position.add(forward)
                     }
@@ -711,10 +722,10 @@
                         game.currentCamera.position.add(forward.negate())
                     }
                     if (game.storage.maingame.input.right) {
-                        game.currentCamera.position.add(right)
+                        game.currentCamera.rotateOnAxis(upVector, -0.1);
                     }
                     if (game.storage.maingame.input.left) {
-                        game.currentCamera.position.add(right.negate())
+                        game.currentCamera.rotateOnAxis(upVector, 0.1);
                     }
                     console.log(game.storage.maingame.input.forward)
                     game.syncLinkedObjects();
