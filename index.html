@@ -568,11 +568,16 @@
                     </div>
                 `;
 
-                const fileLoader = new THREE.FileLoader(manager);
+                const fileLoader = new THREE.FileLoader();
                 fileLoader.setResponseType("json");
                 
                 fileLoader.load(BASEURL + "textdata.json", data => {
                     game.storage.strings = {};
+                    
+                    for (const key in data.strings)
+                        game.storage.strings[key] = data.strings[key][game.getBestLocale(Object.keys(data.strings[key]))];
+
+                    document.title = game.storage.strings.title;
                 });
 
                 return {};
