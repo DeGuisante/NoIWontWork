@@ -7,6 +7,10 @@
 		"title": {
 			"base": "No I Won't Work",
 			"ru": "Когда Работать?"
+		},
+		"clicklbm": {
+			"base": "click left mouse button to continue",
+			"ru": "Нажмите левую кнопку мыши для продолжения"
 		}
 	},
 	"gameassets": {

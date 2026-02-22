@@ -144,9 +144,9 @@
                 this.renderer.setAnimationLoop(this.loop.bind(this));
             }
 
-            addLinkedObject(object, rigidBody) {
+            addLinkedObject(object, rigidBody, resolve) {
                 // Добавление связанного объекта и физического тела
-                this.linkedObjectsAndRigidBodies.push({ object, rigidBody });
+                this.linkedObjectsAndRigidBodies.push({ object, rigidBody, resolve });
             }
 
             addSceneGenerator(name, generator) {
@@ -280,12 +280,13 @@
             }
 
             loop() {
+                const delta = this.clock.getDelta() || 0.016;
                 // Игровой цикл
                 if (this.currentPhysicsWorld) {
                     this.currentPhysicsWorld.step();
-                    this.currentPhysicsUpdate?.(this);
+                    this.currentPhysicsUpdate?.(this, delta);
                 }
-                this.currentUpdate?.(this);
+                this.currentUpdate?.(this, delta);
                 this.updateDebugColliders();
 
                 if (this.currentComposer) {
@@ -332,6 +333,33 @@
             applyDefaultObjectShadowSettings(object) {
                 object.castShadow = true;
                 object.receiveShadow = true;
+            }
+
+            createFixedCollider(physcisWorld, x, y, z, w, h, d) {
+                // Создание фиксированного коллайдера
+                const bodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(x, y, z);
+                const colliderDesc = RAPIER.ColliderDesc.cuboid(w, h, d);
+                const body = physcisWorld.createRigidBody(bodyDesc);
+                physcisWorld.createCollider(colliderDesc, body);
+            }
+
+            createPlayerBody(physicsWorld, playerRadius, playerHeight, x, y, z) {
+                // Создание игрока
+                const playerBodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, 5, 0);
+                const playerBody = physicsWorld.createRigidBody(playerBodyDesc);
+                const playerColliderDesc = RAPIER.ColliderDesc.capsule(playerHeight/2, playerRadius);
+                const playerCollider = physicsWorld.createCollider(playerColliderDesc, playerBody);
+
+                // Создаем сам Rapier Character Controller
+                const characterController = physicsWorld.createCharacterController(0.01);
+                characterController.setApplyImpulsesToDynamicBodies(true); // Позволяет толкать динамические объекты
+                characterController.setSlideEnabled(true); // Скольжение по стенам
+                
+                // Настройка подъема по ступенькам: (maxHeight, minWidth, includeDynamicBodies)
+                characterController.enableAutostep(0.3, 0.1, false); 
+                characterController.setMaxSlopeClimbAngle(45 * (Math.PI / 180)); // Максимальный угол наклона для ходьбы
+
+                return {characterController, playerBody, playerCollider};
             }
 
             createDebugMeshForCollider(collider) {
@@ -552,7 +580,7 @@
                 createPhysicalObject('cylinder', new THREE.Vector3(5, 3, 4), 0xffcc88, { halfHeight: 0.6, r: 0.5 });
                 createPhysicalObject('cone', new THREE.Vector3(7, 4, 2), 0xcc88ff, { halfHeight: 0.8, r: 0.5 });
 
-                const physicsUpdate = (game) => {
+                const physicsUpdate = (game, delta) => {
                     game.syncLinkedObjects();
                 };
 
@@ -654,13 +682,10 @@
                 const gravity = { x: 0.0, y: -9.81, z: 0.0 };
                 const physicsWorld = new RAPIER.World(gravity);
 
-                const groundBodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, 0);
-                const groundBody = physicsWorld.createRigidBody(groundBodyDesc);
-                const groundColliderDesc = RAPIER.ColliderDesc.cuboid(10, 0, 10);
-                physicsWorld.createCollider(groundColliderDesc, groundBody);
+                game.createFixedCollider(physicsWorld, 0, 0, 0, 10, 0, 10);
+                game.createFixedCollider(physicsWorld, 0, 2, -2.21, 2, 2, 0);
 
                 const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 100);
-                camera.position.set(0, 1.5, -3);
 
                 game.storage.maingame.controls = new PointerLockControls(camera, game.renderer.domElement);
                 const composer = game.createComposer(scene, camera);
@@ -671,6 +696,7 @@
                 composer.addPass( ssaoPass );
 
                 scene.add(game.storage.assets.location.scene);
+
                 composer.addPass(new UnrealBloomPass( 
 					new THREE.Vector2( game.renderer.domElement.clientWidth, game.renderer.domElement.clientHeight ),
 					1.5, // strength - сила свечения
@@ -686,6 +712,18 @@
                 game.applyDefaultLightShadowSettings(light);
                 
                 camera.add(light);
+                
+                const playerSize = 0.75;
+                const { characterController, playerBody, playerCollider } = game.createPlayerBody(physicsWorld, playerSize/2, playerSize, 0, 0, -3);
+
+                playerBody.setNextKinematicTranslation({x:0, y:playerSize, z:-4});
+
+                game.addLinkedObject(camera, playerBody, (object, rigidBody) => {
+                    const position = rigidBody.translation();
+                    const rotation = rigidBody.rotation();
+
+                    object.position.set(position.x, position.y + playerSize/2, position.z);
+                });
                 scene.add(camera);
                 
                 const keydown = (game, event) => {
@@ -709,32 +747,47 @@
                     }
                 };
 
-                const update = /** @param {DobrodzeyEngine} game */ (game) => {
+                const update = /** @param {DobrodzeyEngine} game */ (game, delta) => {
                 };
 
-                const physicsUpdate = (game) => {
+                const physicsUpdate = (game, delta) => {
                     const forward = new THREE.Vector3();
                     game.currentCamera.getWorldDirection(forward);
                     forward.y = 0;
-                    forward.normalize().multiplyScalar(0.1);
-                    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize().multiplyScalar(0.1);
+                    forward.normalize().multiplyScalar(5);
+                    const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize().multiplyScalar(5);
+
+                    const direction = new THREE.Vector3();
                     //const upVector = new THREE.Vector3(0, 1, 0)
                     if (game.storage.maingame.input.forward) {
-                        game.currentCamera.position.add(forward);
+                        direction.add(forward);
                     }
                     if (game.storage.maingame.input.backward) {
-                        game.currentCamera.position.add(forward.negate());
+                        direction.add(forward.negate());
                     }
                     if (game.storage.maingame.input.right) {
-                        //game.currentCamera.rotateOnAxis(upVector, -0.1);
-                        game.currentCamera.position.add(right);
+                        direction.add(right);
 
                     }
                     if (game.storage.maingame.input.left) {
-                        //game.currentCamera.rotateOnAxis(upVector, 0.1);
-                        game.currentCamera.position.add(right.negate());
-
+                        direction.add(right.negate());
                     }
+
+                    direction.y = game.currentPhysicsWorld.gravity.y;
+
+                    direction.multiplyScalar(delta);
+
+                    characterController.computeColliderMovement(playerCollider, direction);
+                    const computedMovement = characterController.computedMovement();
+
+                    const currentPos = playerBody.translation();
+                    const nextPos = {
+                        x: currentPos.x + computedMovement.x,
+                        y: currentPos.y + computedMovement.y,
+                        z: currentPos.z + computedMovement.z
+                    };
+                    playerBody.setNextKinematicTranslation(nextPos);
+
                     game.syncLinkedObjects();
                 };
 
