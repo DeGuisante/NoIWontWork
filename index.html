@@ -657,7 +657,7 @@
 
                     manager.onLoad = () => {
                         loadingscreenBackground.animate([{ clipPath: 'circle(200% at 10% 95%)'}, {clipPath: 'circle(0% at 10% 95%)' }], { duration: 1000, easing: 'ease-in-out', fill: 'forwards' }).onfinish = () => {
-                            game.debugCollidersEnabled = true;
+                            //game.debugCollidersEnabled = true;
                             game.generateScene("maingame");
                         };
                     };
