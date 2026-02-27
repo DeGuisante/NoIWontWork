@@ -99,6 +99,68 @@
 
         const BASEURL = "https://raw.githubusercontent.com/DeGuisante/noiwontwork.github.io/refs/heads/master/data/"
 
+        class ThreeObjectBuilder {
+            #object
+            constructor(object) {
+                this.#object = object;
+            }
+
+            clone() {
+                this.#object = this.#object.clone();
+                return this;
+            }
+
+            setPosition(x, y, z) {
+                this.#object.position.set(x, y, z);
+                return this;
+            }
+
+            setRotation(x, y, z, order = 'XYZ') {
+                this.#object.rotation.set(x, y, z, order);
+                return this;
+            }
+
+            setScale(x, y, z = x) {
+                this.#object.scale.set(x, y, z);
+                return this;
+            }
+
+            setQuaternion(x, y, z, w) {
+                this.#object.quaternion.set(x, y, z, w);
+                return this;
+            }
+
+            lookAt(x, y, z) {
+                this.#object.lookAt(x, y, z);
+                return this;
+            }
+
+            setName(name) {
+                this.#object.name = name;
+                return this;
+            }
+
+            setVisible(visible) {
+                this.#object.visible = visible;
+                return this;
+            }
+
+            setShadow({ cast = true, receive = true } = {}) {
+                this.#object.castShadow = cast;
+                this.#object.receiveShadow = receive;
+                return this;
+            }
+
+            addTo(parent) {
+                parent.add(this.#object);
+                return this;
+            }
+
+            getObject() {
+                return this.#object;
+            }
+        }
+
         class DobrodzeyEngine {
             constructor(ui, canvas, backgroundui) {
                 /** @type {HTMLElement} */
@@ -715,10 +777,8 @@
 
                 scene.add(game.storage.assets.location.scene);
 
-                const fridge1 = game.storage.assets.fridge.scene.clone();
-                fridge1.position.set(0, 0, -5);
-                
-                scene.add(fridge1);
+                scene.add(new ThreeObjectBuilder(game.storage.assets.fridge.scene).clone().setPosition(-3.1, 0, -2.85).setRotation(0, Math.PI/2, 0).getObject());
+                scene.add(new ThreeObjectBuilder(game.storage.assets.fridge.scene).clone().setPosition(2.7, 0, 5.8).setRotation(0, Math.PI, 0).getObject());                
 
                 const light = new THREE.PointLight( 0xffffff, 5, 100 );
                 light.position.set( 0, 0.5, 0 );
