@@ -14,7 +14,7 @@
 		}
 	},
 	"gameassets": {
-		"location": {"type": 1, "path":"models/location.glb"},
-		"fridge": {"type": 1, "path":"models/fridge.glb"}
+		"location": {"type": 1, "path":"models/location/location.glb"},
+		"fridge": {"type": 1, "path":"models/location/fridge.glb"}
 	}
 }

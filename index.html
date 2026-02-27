@@ -716,6 +716,15 @@
 
                 const fridge1 = game.storage.assets.fridge.scene.clone();
 
+                fridge1.scale.set(0.5, 0.5, 0.5);
+
+                fridge1.traverse((object) => {
+                    if (object.isMesh) {
+                        console.log('Найден меш:', object.name);
+                        console.log('Геометрия:', object.geometry);
+                        console.log('Материал:', object.material);
+                    }
+                });
                 scene.add(fridge1);
 
 
