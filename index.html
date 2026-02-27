@@ -326,6 +326,7 @@
                 light.shadow.mapSize.height = 1024;
                 light.shadow.camera.near = 1;
                 light.shadow.camera.far = 1000
+                light.shadow.bias = -0.01;
             }
 
             applyDefaultObjectShadowSettings(object) {
@@ -715,19 +716,9 @@
                 scene.add(game.storage.assets.location.scene);
 
                 const fridge1 = game.storage.assets.fridge.scene.clone();
-
-                fridge1.scale.set(0.5, 0.5, 0.5);
-
-                fridge1.traverse((object) => {
-                    if (object.isMesh) {
-                        console.log('Найден меш:', object.name);
-                        console.log('Геометрия:', object.geometry);
-                        console.log('Материал:', object.material);
-                    }
-                });
+                fridge1.position.set(0, 0, -5);
+                
                 scene.add(fridge1);
-
-
 
                 const light = new THREE.PointLight( 0xffffff, 5, 100 );
                 light.position.set( 0, 0.5, 0 );
@@ -745,7 +736,7 @@
                     const position = rigidBody.translation();
                     const rotation = rigidBody.rotation();
 
-                    object.position.set(position.x, position.y + playerSize/2, position.z);
+                    object.position.set(position.x, position.y + playerSize, position.z);
                 });
                 scene.add(camera);
                 
