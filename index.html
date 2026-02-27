@@ -117,8 +117,6 @@
 
                 this.currentUpdate = undefined;
                 this.currentPhysicsUpdate = undefined;
-                this.currentKeyup = undefined;
-                this.currentKeydown = undefined;
 
                 this.sceneGenerators = {};
                 this.storage = {};
@@ -177,7 +175,7 @@
             }
 
             #updateEventHandler(target, eventName, propName, handler) {
-                // Обновление обработчика событий
+                // Обновление обработчиков событий
                 if (this[propName]) {
                     target.removeEventListener(eventName, this[propName]);
                 }
@@ -682,9 +680,6 @@
                 const gravity = { x: 0.0, y: -9.81, z: 0.0 };
                 const physicsWorld = new RAPIER.World(gravity);
 
-                game.createFixedCollider(physicsWorld, 0, 0, 0, 10, 0, 10);
-                game.createFixedCollider(physicsWorld, 0, 2, -2.21, 2, 2, 0);
-
                 const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 100);
 
                 game.storage.maingame.controls = new PointerLockControls(camera, game.renderer.domElement);
@@ -695,8 +690,6 @@
                 ssaoPass.maxDistance = 0.05;
                 composer.addPass( ssaoPass );
 
-                scene.add(game.storage.assets.location.scene);
-
                 composer.addPass(new UnrealBloomPass( 
 					new THREE.Vector2( game.renderer.domElement.clientWidth, game.renderer.domElement.clientHeight ),
 					1.5, // strength - сила свечения
@@ -705,6 +698,27 @@
 				));
 
                 composer.addPass( new OutputPass() );
+
+                // ==== РАЗМЕЩЕНИЕ ОБЪЕКТОВ НА СЦЕНЕ
+
+                // ==== КОЛЛАЙДЕРЫ
+                game.createFixedCollider(physicsWorld, 0, 0, 0, 10, 0, 10);
+                game.createFixedCollider(physicsWorld, -1.4, 2, -2.21, 3, 2, 0);
+                game.createFixedCollider(physicsWorld, 0, 2, -5.89, 4, 2, 0);
+                game.createFixedCollider(physicsWorld, -3.7, 2, -5.89, 0, 2, 4);
+                game.createFixedCollider(physicsWorld, 3.4, 2, -2, 0, 2, 4);
+                game.createFixedCollider(physicsWorld, 3.6, 2, -4.85, 0.9, 2, 0.8);
+                game.createFixedCollider(physicsWorld, -3, 2, -2.65, 0.6, 2, 0.6);
+
+                // ==== ЛОКАЦИЯ
+
+                scene.add(game.storage.assets.location.scene);
+
+                const fridge1 = game.storage.assets.fridge.scene.clone();
+
+                scene.add(fridge1);
+
+
 
                 const light = new THREE.PointLight( 0xffffff, 5, 100 );
                 light.position.set( 0, 0.5, 0 );

@@ -9,11 +9,12 @@
 			"ru": "Когда Работать?"
 		},
 		"clicklbm": {
-			"base": "click left mouse button to continue",
+			"base": "Сlick left mouse button to continue",
 			"ru": "Нажмите левую кнопку мыши для продолжения"
 		}
 	},
 	"gameassets": {
-		"location": {"type": 1, "path":"models/location.glb"}
+		"location": {"type": 1, "path":"models/location.glb"},
+		"fridge": {"type": 1, "path":"models/fridge.glb"}
 	}
 }
