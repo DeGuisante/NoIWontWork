@@ -404,6 +404,212 @@
             }
         }
 
+        class DobrodzeyDebugManager {
+            constructor() {
+                this._enabled = false;
+                this.currentScene = undefined;
+                this.currentPhysicsWorld = undefined;
+                this.colliderMeshes = new Map();
+                this.helpers = [];
+                this.colliderMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x00ff00,
+                    wireframe: true,
+                    transparent: true,
+                    opacity: 0.5
+                });
+            }
+
+            get enabled() {
+                return this._enabled;
+            }
+
+            set enabled(value) {
+                this.setEnabled(value);
+            }
+
+            reset() {
+                this.clearColliderMeshes();
+
+                for (const helper of this.helpers) {
+                    helper.scene.remove(helper.object);
+                    if (helper.dispose) {
+                        this.disposeObject(helper.object);
+                    }
+                }
+
+                this.helpers = [];
+                this.currentScene = undefined;
+                this.currentPhysicsWorld = undefined;
+            }
+
+            attach(scene, physicsWorld) {
+                this.currentScene = scene;
+                this.currentPhysicsWorld = physicsWorld;
+                this.syncHelpersVisibility();
+            }
+
+            setEnabled(enabled) {
+                this._enabled = Boolean(enabled);
+                if (!this._enabled) {
+                    this.clearColliderMeshes();
+                }
+                this.syncHelpersVisibility();
+            }
+
+            registerHelper(scene, object, options = {}) {
+                const { dispose = false } = options;
+                scene.add(object);
+                object.visible = this.enabled;
+                this.helpers.push({ scene, object, dispose });
+            }
+
+            createParticleAreaHelper(area) {
+                const boxGeometry = new THREE.BoxGeometry(area.size.x, area.size.y, area.size.z);
+                const edgesGeometry = new THREE.EdgesGeometry(boxGeometry);
+                boxGeometry.dispose();
+
+                const material = new THREE.LineBasicMaterial({
+                    color: 0x2f6bff,
+                    transparent: true,
+                    opacity: 0.9
+                });
+
+                const object = new THREE.LineSegments(edgesGeometry, material);
+                object.position.set(area.center.x, area.center.y, area.center.z);
+                object.frustumCulled = false;
+                object.renderOrder = 3;
+                return object;
+            }
+
+            update() {
+                this.syncHelpersVisibility();
+                this.updateColliders();
+            }
+
+            clearColliderMeshes() {
+                if (this.currentScene) {
+                    for (const mesh of this.colliderMeshes.values()) {
+                        this.currentScene.remove(mesh);
+                        this.disposeObject(mesh);
+                    }
+                }
+
+                this.colliderMeshes.clear();
+            }
+
+            syncHelpersVisibility() {
+                for (const { object } of this.helpers) {
+                    object.visible = this.enabled;
+                }
+            }
+
+            disposeObject(object) {
+                if (!object) {
+                    return;
+                }
+
+                if (object.geometry) {
+                    object.geometry.dispose();
+                }
+
+                if (object.material) {
+                    if (Array.isArray(object.material)) {
+                        object.material.forEach((material) => material.dispose());
+                    } else {
+                        object.material.dispose();
+                    }
+                }
+
+                object.children?.forEach((child) => this.disposeObject(child));
+            }
+
+            createColliderMesh(collider) {
+                const type = collider.shapeType();
+                let mesh = null;
+
+                if (type === RAPIER.ShapeType.Cuboid) {
+                    const he = collider.halfExtents();
+                    const geometry = new THREE.BoxGeometry(he.x * 2, he.y * 2, he.z * 2);
+                    mesh = new THREE.Mesh(geometry, this.colliderMaterial.clone());
+                }
+                else if (type === RAPIER.ShapeType.Ball) {
+                    const r = collider.radius();
+                    const geometry = new THREE.SphereGeometry(r, 16, 16);
+                    mesh = new THREE.Mesh(geometry, this.colliderMaterial.clone());
+                }
+                else if (type === RAPIER.ShapeType.Capsule) {
+                    const r = collider.radius();
+                    const halfHeight = collider.halfHeight();
+                    const group = new THREE.Group();
+
+                    const cylGeo = new THREE.CylinderGeometry(r, r, halfHeight * 2, 16);
+                    const cylinder = new THREE.Mesh(cylGeo, this.colliderMaterial.clone());
+                    group.add(cylinder);
+
+                    const sphereGeo = new THREE.SphereGeometry(r, 16, 16);
+                    const topSphere = new THREE.Mesh(sphereGeo, this.colliderMaterial.clone());
+                    topSphere.position.y = halfHeight;
+                    group.add(topSphere);
+
+                    const bottomSphere = new THREE.Mesh(sphereGeo, this.colliderMaterial.clone());
+                    bottomSphere.position.y = -halfHeight;
+                    group.add(bottomSphere);
+
+                    mesh = group;
+                }
+                else if (type === RAPIER.ShapeType.Cylinder) {
+                    const r = collider.radius();
+                    const halfHeight = collider.halfHeight();
+                    const geometry = new THREE.CylinderGeometry(r, r, halfHeight * 2, 16);
+                    mesh = new THREE.Mesh(geometry, this.colliderMaterial.clone());
+                }
+                else if (type === RAPIER.ShapeType.Cone) {
+                    const r = collider.radius();
+                    const halfHeight = collider.halfHeight();
+                    const geometry = new THREE.ConeGeometry(r, halfHeight * 2, 16);
+                    mesh = new THREE.Mesh(geometry, this.colliderMaterial.clone());
+                }
+
+                return mesh;
+            }
+
+            updateColliders() {
+                if (!this.enabled || !this.currentScene || !this.currentPhysicsWorld) return;
+
+                const currentColliders = new Set();
+
+                this.currentPhysicsWorld.forEachCollider((collider) => {
+                    currentColliders.add(collider);
+
+                    let mesh = this.colliderMeshes.get(collider);
+                    if (!mesh) {
+                        mesh = this.createColliderMesh(collider);
+                        if (mesh) {
+                            this.currentScene.add(mesh);
+                            this.colliderMeshes.set(collider, mesh);
+                        }
+                    }
+
+                    if (!mesh) {
+                        return;
+                    }
+
+                    const pos = collider.translation();
+                    const rot = collider.rotation();
+                    mesh.position.set(pos.x, pos.y, pos.z);
+                    mesh.quaternion.set(rot.x, rot.y, rot.z, rot.w);
+                });
+
+                for (const [collider, mesh] of this.colliderMeshes.entries()) {
+                    if (!currentColliders.has(collider)) {
+                        this.currentScene.remove(mesh);
+                        this.disposeObject(mesh);
+                        this.colliderMeshes.delete(collider);
+                    }
+                }
+            }
+        }
+
         class DobrodzeyEngine {
             constructor(ui, canvas, backgroundui) {
                 /** @type {HTMLElement} */
@@ -427,45 +633,31 @@
                 this.storage = {};
 
                 this.linkedObjectsAndRigidBodies = [];
-
-                this.debugCollidersEnabled = false;
-                this.debugCollidersMeshes = new Map();
-
-                this.debugMaterial = new THREE.MeshBasicMaterial({
-                    color: 0x00ff00,
-                    wireframe: true,
-                    transparent: true,
-                    opacity: 0.5
-                });
+                this.debug = new DobrodzeyDebugManager();
 
                 this.defaultmaterial = new THREE.MeshStandardMaterial({ color: 0x808080 });
             }
 
             async init() {
-                // Инициализация Rapier
                 await RAPIER.init();
                 this.renderer.setAnimationLoop(this.loop.bind(this));
             }
 
             addLinkedObject(object, rigidBody, resolve) {
-                // Добавление связанного объекта и физического тела
                 this.linkedObjectsAndRigidBodies.push({ object, rigidBody, resolve });
             }
 
             addSceneGenerator(name, generator) {
-                // Добавление генератора сцены
                 this.sceneGenerators[name] = generator;
             }
 
             createComposer(scene, camera) {
-                // Дефолт создавалка композера
                 const composer = new EffectComposer(this.renderer);
                 composer.addPass(new RenderPass(scene, camera));
                 return composer;
             }
 
             syncLinkedObjects() {
-                // Синхронизация связанных объектов с физикой
                 for (const { object, rigidBody, resolve } of this.linkedObjectsAndRigidBodies) {
                     if (resolve) {
                         resolve(object, rigidBody);
@@ -480,7 +672,6 @@
             }
 
             #updateEventHandler(target, eventName, propName, handler) {
-                // Обновление обработчиков событий
                 if (this[propName]) {
                     target.removeEventListener(eventName, this[propName]);
                 }
@@ -493,10 +684,9 @@
             }
 
             generateScene(name) {
-                // Генерация сцены (почти как смена сцены из юнити)
                 const generator = this.sceneGenerators[name];
                 if (generator) {
-                    this.clearDebugColliders();
+                    this.debug.reset();
 
                     this.renderer.toneMapping = THREE.NoToneMapping;
                     this.linkedObjectsAndRigidBodies = [];
@@ -510,10 +700,11 @@
 
                     this.currentUpdate = sceneData.update;
                     this.currentPhysicsUpdate = sceneData.physicsUpdate;
-                    
-                    this.#updateEventHandler(document, 'keyup',   'currentKeyup',   sceneData.keyup);
+                    this.debug.attach(this.currentScene, this.currentPhysicsWorld);
+
+                    this.#updateEventHandler(document, 'keyup', 'currentKeyup', sceneData.keyup);
                     this.#updateEventHandler(document, 'keydown', 'currentKeydown', sceneData.keydown);
-                    this.#updateEventHandler(window,   'resize',  'currentResize',  sceneData.resize);
+                    this.#updateEventHandler(window, 'resize', 'currentResize', sceneData.resize);
 
                     this.currentResize?.();
                     sceneData.ready?.(this);
@@ -521,22 +712,18 @@
             }
 
             clearUI() {
-                // Зачищаем передний ui
                 this.ui.replaceChildren();
             }
 
             clearBackgroundUI() {
-                // Зачищаем фоновый ui
                 this.backgroundui.replaceChildren();
             }
 
             wrapFunctionWithGameIfItIsNotNull(func) {
-                // Если функция не null, возвращаем её с добавлением игрового контекста
                 return func ? (...args) => func(this, ...args) : undefined;
             }
 
             cameraResize() {
-                // Обновление проекции камеры
                 if (this.currentCamera) {
                     this.currentCamera.aspect = this.renderer.domElement.clientWidth / this.renderer.domElement.clientHeight;
                     this.currentCamera.updateProjectionMatrix();
@@ -544,14 +731,12 @@
             }
 
             renderResize() {
-                // Обновление размера рендера
                 this.renderer.setPixelRatio(window.devicePixelRatio);
                 this.currentComposer?.setSize(this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight);
                 this.renderer.setSize(this.renderer.domElement.clientWidth, this.renderer.domElement.clientHeight, false);
             }
 
             getBestLocale(supportedLocales = ['base']) {
-                // Найти подходящую локализацию из всех
                 const browserLangs = navigator.languages?.length > 0
                     ? navigator.languages
                     : [navigator.language || navigator.userLanguage || 'en'];
@@ -565,32 +750,33 @@
 
                 for (const browserLang of normalizedBrowserLangs) {
                     for (const supported of supportedMap) {
-                        if (supported.normalized === browserLang)
+                        if (supported.normalized === browserLang) {
                             return supported.original;
+                        }
                     }
                 }
 
                 for (const browserLang of normalizedBrowserLangs) {
                     const langCode = browserLang.split('-')[0];
                     for (const supported of supportedMap) {
-                        if (supported.normalized === langCode || supported.normalized.startsWith(langCode + '-'))
+                        if (supported.normalized === langCode || supported.normalized.startsWith(langCode + '-')) {
                             return supported.original;
+                        }
                     }
                 }
 
-                const baseLocale = supportedLocales.find(l => l === 'base');
+                const baseLocale = supportedLocales.find(locale => locale === 'base');
                 return baseLocale || supportedLocales[0] || 'base';
             }
 
             loop() {
                 const delta = this.clock.getDelta() || 0.016;
-                // Игровой цикл
                 if (this.currentPhysicsWorld) {
                     this.currentPhysicsWorld.step();
                     this.currentPhysicsUpdate?.(this, delta);
                 }
                 this.currentUpdate?.(this, delta);
-                this.updateDebugColliders();
+                this.debug.update();
 
                 if (this.currentComposer) {
                     this.currentComposer.render();
@@ -599,38 +785,12 @@
                 }
             }
 
-            clearDebugColliders() {
-                // Очищаем ВСЕ debug-меши
-                if (this.currentScene) {
-                    for (let mesh of this.debugCollidersMeshes.values()) {
-                        this.currentScene.remove(mesh);
-                        this.disposeMesh(mesh);
-                    }
-                }
-                this.debugCollidersMeshes.clear();
-            }
-
-            disposeMesh(obj) {
-                // Освобождаем ресурсы (геометрию, материал)
-                if (obj instanceof THREE.Mesh) {
-                    if (obj.geometry) obj.geometry.dispose();
-                    if (obj.material) {
-                        if (Array.isArray(obj.material))
-                            obj.material.forEach(m => m.dispose());
-                        else
-                            obj.material.dispose();
-                    }
-                } else if (obj instanceof THREE.Group) {
-                    obj.children.forEach(child => this.disposeMesh(child));
-                }
-            }
-
             applyDefaultLightShadowSettings(light) {
                 light.castShadow = true;
                 light.shadow.mapSize.width = 1024;
                 light.shadow.mapSize.height = 1024;
                 light.shadow.camera.near = 1;
-                light.shadow.camera.far = 1000
+                light.shadow.camera.far = 1000;
                 light.shadow.bias = -0.01;
             }
 
@@ -640,7 +800,6 @@
             }
 
             createFixedCollider(physcisWorld, x, y, z, w, h, d) {
-                // Создание фиксированного коллайдера
                 const bodyDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(x, y, z);
                 const colliderDesc = RAPIER.ColliderDesc.cuboid(w, h, d);
                 const body = physcisWorld.createRigidBody(bodyDesc);
@@ -648,123 +807,20 @@
             }
 
             createPlayerBody(physicsWorld, playerRadius, playerHeight, x, y, z) {
-                // Создание игрока
                 const playerBodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(x, y, z);
                 const playerBody = physicsWorld.createRigidBody(playerBodyDesc);
-                const playerColliderDesc = RAPIER.ColliderDesc.capsule(playerHeight/2, playerRadius);
+                const playerColliderDesc = RAPIER.ColliderDesc.capsule(playerHeight / 2, playerRadius);
                 const playerCollider = physicsWorld.createCollider(playerColliderDesc, playerBody);
 
-                // Создаем сам Rapier Character Controller
                 const characterController = physicsWorld.createCharacterController(0.01);
-                characterController.setApplyImpulsesToDynamicBodies(true); // Позволяет толкать динамические объекты
-                characterController.setSlideEnabled(true); // Скольжение по стенам
-                
-                // Настройка подъема по ступенькам: (maxHeight, minWidth, includeDynamicBodies)
-                characterController.enableAutostep(0.3, 0.1, false); 
-                characterController.setMaxSlopeClimbAngle(45 * (Math.PI / 180)); // Максимальный угол наклона для ходьбы
+                characterController.setApplyImpulsesToDynamicBodies(true);
+                characterController.setSlideEnabled(true);
+                characterController.enableAutostep(0.3, 0.1, false);
+                characterController.setMaxSlopeClimbAngle(45 * (Math.PI / 180));
 
-                return {characterController, playerBody, playerCollider};
-            }
-
-            createDebugMeshForCollider(collider) {
-                // Генерация debug-меши
-                const type = collider.shapeType();
-                let mesh = null;
-
-                if (type === RAPIER.ShapeType.Cuboid) {
-                    const he = collider.halfExtents();
-                    const geometry = new THREE.BoxGeometry(he.x * 2, he.y * 2, he.z * 2);
-                    mesh = new THREE.Mesh(geometry, this.debugMaterial.clone());
-                }
-                else if (type === RAPIER.ShapeType.Ball) {
-                    const r = collider.radius();
-                    const geometry = new THREE.SphereGeometry(r, 16, 16);
-                    mesh = new THREE.Mesh(geometry, this.debugMaterial.clone());
-                }
-                else if (type === RAPIER.ShapeType.Capsule) {
-                    const r = collider.radius();
-                    const halfHeight = collider.halfHeight();
-                    const group = new THREE.Group();
-                    
-                    const cylGeo = new THREE.CylinderGeometry(r, r, halfHeight * 2, 16);
-                    const cylMat = this.debugMaterial.clone();
-                    const cylinder = new THREE.Mesh(cylGeo, cylMat);
-                    cylinder.position.y = 0;
-                    group.add(cylinder);
-
-                    const sphereGeo = new THREE.SphereGeometry(r, 16, 16);
-                    const sphereMat = this.debugMaterial.clone();
-                    const topSphere = new THREE.Mesh(sphereGeo, sphereMat);
-                    topSphere.position.y = halfHeight;
-                    group.add(topSphere);
-
-                    const bottomSphere = new THREE.Mesh(sphereGeo, sphereMat.clone());
-                    bottomSphere.position.y = -halfHeight;
-                    group.add(bottomSphere);
-
-                    mesh = group;
-                }
-                else if (type === RAPIER.ShapeType.Cylinder) {
-                    const r = collider.radius();
-                    const halfHeight = collider.halfHeight();
-                    const geometry = new THREE.CylinderGeometry(r, r, halfHeight * 2, 16);
-                    mesh = new THREE.Mesh(geometry, this.debugMaterial.clone());
-                }
-                else if (type === RAPIER.ShapeType.Cone) {
-                    const r = collider.radius();
-                    const halfHeight = collider.halfHeight();
-                    const geometry = new THREE.ConeGeometry(r, halfHeight * 2, 16);
-                    mesh = new THREE.Mesh(geometry, this.debugMaterial.clone());
-                }
-                else {
-                    return null;
-                }
-
-                return mesh;
-            }
-
-            updateDebugColliders() {
-                // Отладка коллайдеров
-                if (!this.debugCollidersEnabled || !this.currentPhysicsWorld || !this.currentScene) return;
-
-                const world = this.currentPhysicsWorld;
-                const currentColliders = new Set();
-
-                // Перебираем все коллайдеры в мире
-                world.forEachCollider((collider) => {
-                    currentColliders.add(collider);
-
-                    let mesh = this.debugCollidersMeshes.get(collider);
-                    if (!mesh) {
-                        mesh = this.createDebugMeshForCollider(collider);
-                        if (mesh) {
-                            this.currentScene.add(mesh);
-                            this.debugCollidersMeshes.set(collider, mesh);
-                        }
-                    }
-
-                    if (mesh) {
-                        // Обновляем позицию и поворот коллайдера (в мировых координатах)
-                        const pos = collider.translation();
-                        const rot = collider.rotation();
-                        mesh.position.set(pos.x, pos.y, pos.z);
-                        mesh.quaternion.set(rot.x, rot.y, rot.z, rot.w);
-                    }
-                });
-
-                // Удаляем меши для коллайдеров, которые больше не существуют
-                // Это необходимо, чтобы debug-меши не оставались в сцене после уничтожения объектов
-                for (let [collider, mesh] of this.debugCollidersMeshes.entries()) {
-                    if (!currentColliders.has(collider)) {
-                        this.currentScene.remove(mesh);
-                        this.disposeMesh(mesh);
-                        this.debugCollidersMeshes.delete(collider);
-                    }
-                }
+                return { characterController, playerBody, playerCollider };
             }
         }
-
-        // ========== СОЗДАНИЕ ИГРЫ И СЦЕН ==========
 
         const game = new DobrodzeyEngine (
             document.querySelector("#ui"),
@@ -961,7 +1017,6 @@
 
                     manager.onLoad = () => {
                         loadingscreenBackground.animate([{ clipPath: 'circle(200% at 10% 95%)'}, {clipPath: 'circle(0% at 10% 95%)' }], { duration: 1000, easing: 'ease-in-out', fill: 'forwards' }).onfinish = () => {
-                            //game.debugCollidersEnabled = true;
                             game.generateScene("maingame");
                         };
                     };
@@ -1031,6 +1086,7 @@
                 if (dustSettings.enabled) {
                     game.storage.maingame.effects.dust = new LocationDustParticleSystem(game.renderer, dustSettings);
                     scene.add(game.storage.maingame.effects.dust.object);
+                    game.debug.registerHelper(scene, game.debug.createParticleAreaHelper(dustSettings.area), { dispose: true });
                 } else {
                     game.storage.maingame.effects.dust = undefined;
                 }
