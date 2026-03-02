@@ -324,8 +324,6 @@
                 this.geometry.setAttribute("aAlpha", new THREE.BufferAttribute(this.alphas, 1));
 
                 this.object = new THREE.Points(this.geometry, this.material);
-                this.object.frustumCulled = false;
-                this.object.renderOrder = 2;
             }
 
             #fillParticles() {
@@ -399,6 +397,7 @@
             }
 
             dispose() {
+                this.object.parent?.remove(this.object);
                 this.geometry.dispose();
                 this.material.dispose();
             }
@@ -410,10 +409,15 @@
                 this.currentScene = undefined;
                 this.currentPhysicsWorld = undefined;
                 this.colliderMeshes = new Map();
-                this.helpers = [];
+                this.areaEntries = new Map();
                 this.colliderMaterial = new THREE.MeshBasicMaterial({
                     color: 0x00ff00,
                     wireframe: true,
+                    transparent: true,
+                    opacity: 0.5
+                });
+                this.lineMaterial = new THREE.LineBasicMaterial({
+                    color: 0x2f6bff,
                     transparent: true,
                     opacity: 0.5
                 });
@@ -429,15 +433,7 @@
 
             reset() {
                 this.clearColliderMeshes();
-
-                for (const helper of this.helpers) {
-                    helper.scene.remove(helper.object);
-                    if (helper.dispose) {
-                        this.disposeObject(helper.object);
-                    }
-                }
-
-                this.helpers = [];
+                this.clearAreas();
                 this.currentScene = undefined;
                 this.currentPhysicsWorld = undefined;
             }
@@ -445,7 +441,6 @@
             attach(scene, physicsWorld) {
                 this.currentScene = scene;
                 this.currentPhysicsWorld = physicsWorld;
-                this.syncHelpersVisibility();
             }
 
             setEnabled(enabled) {
@@ -453,36 +448,46 @@
                 if (!this._enabled) {
                     this.clearColliderMeshes();
                 }
-                this.syncHelpersVisibility();
+                for (const entry of this.areaEntries.values()) {
+                    if (entry.helper) {
+                        entry.helper.visible = this._enabled;
+                    }
+                }
             }
 
-            registerHelper(scene, object, options = {}) {
-                const { dispose = false } = options;
-                scene.add(object);
-                object.visible = this.enabled;
-                this.helpers.push({ scene, object, dispose });
+            registerArea(sourceObject, getArea) {
+                const existingEntry = this.areaEntries.get(sourceObject);
+                if (existingEntry) {
+                    this.removeAreaHelper(existingEntry);
+                }
+
+                this.areaEntries.set(sourceObject, {
+                    getArea,
+                    helper: undefined
+                });
             }
 
-            createParticleAreaHelper(area) {
-                const boxGeometry = new THREE.BoxGeometry(area.size.x, area.size.y, area.size.z);
+            unregisterArea(sourceObject) {
+                const entry = this.areaEntries.get(sourceObject);
+                if (!entry) {
+                    return;
+                }
+
+                this.removeAreaHelper(entry);
+                this.areaEntries.delete(sourceObject);
+            }
+
+            createParticleAreaHelper() {
+                const boxGeometry = new THREE.BoxGeometry(1, 1, 1);
                 const edgesGeometry = new THREE.EdgesGeometry(boxGeometry);
                 boxGeometry.dispose();
 
-                const material = new THREE.LineBasicMaterial({
-                    color: 0x2f6bff,
-                    transparent: true,
-                    opacity: 0.9
-                });
-
-                const object = new THREE.LineSegments(edgesGeometry, material);
-                object.position.set(area.center.x, area.center.y, area.center.z);
-                object.frustumCulled = false;
-                object.renderOrder = 3;
+                const object = new THREE.LineSegments(edgesGeometry, this.lineMaterial);
                 return object;
             }
 
             update() {
-                this.syncHelpersVisibility();
+                this.syncAreas();
                 this.updateColliders();
             }
 
@@ -497,10 +502,66 @@
                 this.colliderMeshes.clear();
             }
 
-            syncHelpersVisibility() {
-                for (const { object } of this.helpers) {
-                    object.visible = this.enabled;
+            clearAreas() {
+                for (const entry of this.areaEntries.values()) {
+                    this.removeAreaHelper(entry);
                 }
+                this.areaEntries.clear();
+            }
+
+            syncAreas() {
+                const areaCenter = new THREE.Vector3();
+                const areaScale = new THREE.Vector3();
+                const areaQuaternion = new THREE.Quaternion();
+
+                for (const [sourceObject, entry] of this.areaEntries.entries()) {
+                    if (!sourceObject.parent) {
+                        this.removeAreaHelper(entry);
+                        this.areaEntries.delete(sourceObject);
+                        continue;
+                    }
+
+                    const area = entry.getArea?.();
+                    if (!area?.center || !area?.size) {
+                        this.removeAreaHelper(entry);
+                        this.areaEntries.delete(sourceObject);
+                        continue;
+                    }
+
+                    if (!entry.helper && this.currentScene && this.enabled) {
+                        entry.helper = this.createParticleAreaHelper();
+                        this.currentScene.add(entry.helper);
+                    }
+
+                    if (!entry.helper) {
+                        continue;
+                    }
+
+                    sourceObject.updateWorldMatrix(true, false);
+                    areaCenter.set(area.center.x, area.center.y, area.center.z);
+                    sourceObject.localToWorld(areaCenter);
+                    sourceObject.getWorldQuaternion(areaQuaternion);
+                    sourceObject.getWorldScale(areaScale);
+
+                    entry.helper.position.copy(areaCenter);
+                    entry.helper.quaternion.copy(areaQuaternion);
+                    entry.helper.scale.set(
+                        areaScale.x * area.size.x,
+                        areaScale.y * area.size.y,
+                        areaScale.z * area.size.z
+                    );
+                    entry.helper.visible = this.enabled;
+                }
+            }
+
+            removeAreaHelper(entry) {
+                if (!entry?.helper) {
+                    return;
+                }
+
+                entry.helper.parent?.remove(entry.helper);
+                this.disposeObject(entry.helper);
+                entry.helper = undefined;
             }
 
             disposeObject(object) {
@@ -1017,6 +1078,7 @@
 
                     manager.onLoad = () => {
                         loadingscreenBackground.animate([{ clipPath: 'circle(200% at 10% 95%)'}, {clipPath: 'circle(0% at 10% 95%)' }], { duration: 1000, easing: 'ease-in-out', fill: 'forwards' }).onfinish = () => {
+                            //game.debug.enabled = true;
                             game.generateScene("maingame");
                         };
                     };
@@ -1070,7 +1132,7 @@
                 game.createFixedCollider(physicsWorld, -3.7, 2, -5.89, 0, 2, 4);
                 game.createFixedCollider(physicsWorld, 3.4, 2, -2, 0, 2, 4);
                 game.createFixedCollider(physicsWorld, 3.6, 2, -4.85, 0.9, 2, 0.8);
-                game.createFixedCollider(physicsWorld, -3, 2, -2.65, 0.6, 2, 0.6);
+                game.createFixedCollider(physicsWorld, -3, 2, -2.85, 0.6, 2, 0.6);
 
                 // ==== ЛОКАЦИЯ
 
@@ -1086,7 +1148,10 @@
                 if (dustSettings.enabled) {
                     game.storage.maingame.effects.dust = new LocationDustParticleSystem(game.renderer, dustSettings);
                     scene.add(game.storage.maingame.effects.dust.object);
-                    game.debug.registerHelper(scene, game.debug.createParticleAreaHelper(dustSettings.area), { dispose: true });
+                    game.debug.registerArea(
+                        game.storage.maingame.effects.dust.object,
+                        () => game.storage.maingame.effects.dust?.settings?.area
+                    );
                 } else {
                     game.storage.maingame.effects.dust = undefined;
                 }
