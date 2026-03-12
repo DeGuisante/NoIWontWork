@@ -97,7 +97,7 @@
         import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
         import RAPIER from 'rapier';
 
-        const BASEURL = "https://raw.githubusercontent.com/DeGuisante/noiwontwork.github.io/refs/heads/master/data/"
+        const BASEURL = "https://raw.githubusercontent.com/DeGuisante/noiwontwork.github.io/refs/heads/master/data/";
 
         class ThreeObjectBuilder {
             #object
@@ -1201,7 +1201,7 @@
 					0.85 // threshold - порог. Пиксели ярче этого значения будут светиться. 1.0 = только самые яркие
 				));
 
-                composer.addPass( new OutputPass() );
+                composer.addPass( new OutputPass() ); 
 
                 // ==== ЛОКАЦИЯ
 
