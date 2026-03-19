@@ -888,12 +888,17 @@
                 object.receiveShadow = true;
             }
 
+            checkObjectPrefix(object, prefix) {
+                return typeof object?.name === 'string'
+                    && object.name.toLowerCase().startsWith(prefix.toLowerCase());
+            }
+
             isColliderMesh(object) {
-                return Boolean(
-                    object?.isMesh &&
-                    typeof object.name === 'string' &&
-                    object.name.toLowerCase().startsWith('col_')
-                );
+                return Boolean(object?.isMesh && this.checkObjectPrefix(object, 'col_'));
+            }
+
+            isMarker(object) {
+                return this.checkObjectPrefix(object, 'marker_');
             }
 
             prepareImportedScene(scene) {
@@ -909,6 +914,40 @@
 
                     this.applyDefaultObjectShadowSettings(node);
                 });
+            }
+
+            collectMarkers(scene) {
+                const markers = {};
+
+                scene.traverse((node) => {
+                    if (this.isMarker(node)) {
+                        markers[node.name] = node;
+                    }
+                });
+
+                return markers;
+            }
+
+            applyMarkerExtraData(markers, extraData) {
+                if (!extraData || typeof extraData !== 'object') {
+                    return markers;
+                }
+
+                for (const markerName in extraData) {
+                    const marker = markers[markerName];
+                    const markerData = extraData[markerName];
+
+                    if (!marker || !markerData || typeof markerData !== 'object') {
+                        continue;
+                    }
+
+                    marker.userData = {
+                        ...marker.userData,
+                        ...markerData
+                    };
+                }
+
+                return markers;
             }
 
             createFixedCollider(physcisWorld, x, y, z, w, h, d) {
@@ -967,7 +1006,8 @@
             instantiateImportedScene(asset, physicsWorld, flags = undefined) {
                 const scene = asset.scene.clone(true);
                 const colliders = this.createFixedCollidersFromObject(physicsWorld, scene, flags);
-                return { scene, colliders };
+                const markers = this.collectMarkers(scene);
+                return { scene, colliders, markers };
             }
 
             createPlayerBody(physicsWorld, playerRadius, playerHeight, x, y, z) {
@@ -1017,6 +1057,7 @@
                 fileLoader.load(BASEURL + "textdata.json", data => {
                     game.storage.assets = {};
                     game.storage.strings = {};
+                    game.storage.markerExtraData = data.markerExtraData ?? {};
                     
                     for (const key in data.strings)
                         game.storage.strings[key] = data.strings[key][game.getBestLocale(Object.keys(data.strings[key]))];
@@ -1111,6 +1152,7 @@
                 // ==== ЛОКАЦИЯ
 
                 const locationImport = game.instantiateImportedScene(game.storage.assets.location, physicsWorld);
+                game.applyMarkerExtraData(locationImport.markers, game.storage.markerExtraData);
 
                 scene.add(locationImport.scene);
 
